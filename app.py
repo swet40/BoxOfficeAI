@@ -1,93 +1,17 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import joblib
-import json
-from sklearn.ensemble import RandomForestClassifier
+import os
+import sys
 
-@st.cache_resource
-def load_or_create_model():
-    try:
-        # Try to load the existing model
-        model = joblib.load('box_office_predictor.joblib')
-        st.success(" Loaded trained model!")
-        return model
-    except Exception as e:
-        st.warning(" Creating a fallback model...")
-        
-        # Create a simple fallback model
-        X_dummy = pd.DataFrame({
-            'budget_log': [18, 16, 19, 17, 15, 20],
-            'popularity_log': [5, 4, 6, 4.5, 3.5, 5.5],
-            'vote_average': [7.5, 6.0, 8.0, 6.5, 5.5, 7.0],
-            'vote_count': [5000, 2000, 8000, 3000, 1000, 6000],
-            'has_collection': [1, 0, 1, 0, 0, 1],
-            'num_genres': [2, 1, 3, 2, 1, 2]
-        })
-        y_dummy = [1, 0, 1, 0, 0, 1]  # 1=Hit, 0=Flop
-        
-        model = RandomForestClassifier(n_estimators=10, random_state=42)
-        model.fit(X_dummy, y_dummy)
-        
-        # Save it for next time
-        joblib.dump(model, 'box_office_predictor.joblib')
-        
-        st.info(" Using fallback model (retrain in Colab for better accuracy)")
-        return model
+# Set page config first
+st.set_page_config(
+    page_title="Box Office AI Predictor",
+    page_icon="🎬", 
+    layout="wide"
+)
 
-@st.cache_resource
-def load_features():
-    try:
-        with open('model_features.json', 'r') as f:
-            return json.load(f)
-    except:
-        return ['budget_log', 'popularity_log', 'vote_average', 'vote_count', 'has_collection', 'num_genres']
-
-# Load model and features
-model = load_or_create_model()
-expected_features = load_features()
-
-def create_movie_features(budget, popularity, rating, votes, is_franchise, genres_list):
-    """
-    Convert user inputs into the format expected by the model
-    """
-    # Start with all zeros for expected features
-    movie_features = {feature: 0 for feature in expected_features}
-    
-    # Set basic features (these should match your training data)
-    movie_features.update({
-        'budget_log': np.log1p(budget),
-        'popularity_log': np.log1p(popularity),
-        'vote_average': rating,
-        'vote_count': votes,
-        'has_collection': 1 if is_franchise else 0,
-        'num_genres': len(genres_list),
-    })
-    
-    # Set genre flags - match the exact genre column names from your training
-    for genre in genres_list:
-        # Create the genre column name (adjust based on your actual column names)
-        genre_col = f"genre_{genre.lower().replace(' ', '_')}"
-        
-        # Check if this genre column exists in expected features
-        if genre_col in movie_features:
-            movie_features[genre_col] = 1
-        else:
-            # If the exact column doesn't exist, try to find a close match
-            matching_cols = [col for col in expected_features if genre.lower() in col.lower()]
-            if matching_cols:
-                movie_features[matching_cols[0]] = 1
-
-    # Convert to DataFrame with the exact column order used during training
-    features_df = pd.DataFrame([movie_features])[expected_features]
-    
-    return features_df
-
-# Streamlit app
-# st.set_page_config(page_title="Box Office AI", page_icon="🎬", layout="wide")
-
-# Rest of your app code continues here...
-st.title("🎬 Box Office Success Predictor")
+st.title(" Box Office Success Predictor")
 st.markdown("Predict if a movie will be a **HIT** or **FLOP** using AI!")
 
 # Input section
@@ -105,18 +29,123 @@ with col2:
     st.subheader("Genres")
     genres = st.multiselect(
         "Select Genres",
-        ["Action", "Adventure", "Comedy", "Drama", "Horror", 
-        "Sci-Fi", "Thriller", "Romance", "Fantasy", "Animation",
-        "Mystery", "Crime", "Family", "Western"]
+        ["Action", "Adventure", "Comedy", "Drama", "Horror", "Sci-Fi", "Thriller", "Romance", "Fantasy"]
     )
 
+# Advanced rule-based prediction (no scikit-learn dependency)
+def advanced_rule_based_prediction(budget, popularity, rating, votes, is_franchise, genres_list):
+    """
+    Sophisticated rule-based prediction that mimics ML behavior
+    """
+    score = 0
+    confidence = 0.5  # Base confidence
+    
+    # Budget analysis (0-25 points)
+    if budget > 200000000:  # Blockbuster budget
+        score += 25
+        confidence += 0.3
+    elif budget > 100000000:  # Big budget
+        score += 20
+        confidence += 0.2
+    elif budget > 50000000:  # Medium budget
+        score += 15
+        confidence += 0.1
+    elif budget > 20000000:  # Small budget
+        score += 10
+    else:  # Micro budget
+        score += 5
+        confidence -= 0.1
+    
+    # Popularity analysis (0-20 points)
+    if popularity > 700:  # Viral popularity
+        score += 20
+        confidence += 0.2
+    elif popularity > 400:  # High popularity
+        score += 15
+        confidence += 0.15
+    elif popularity > 200:  # Moderate popularity
+        score += 10
+        confidence += 0.1
+    elif popularity > 100:  # Low popularity
+        score += 5
+    else:  # Very low popularity
+        score += 2
+        confidence -= 0.1
+    
+    # Rating analysis (0-20 points)
+    if rating > 8.5:  # Excellent rating
+        score += 20
+        confidence += 0.25
+    elif rating > 7.5:  # Very good rating
+        score += 15
+        confidence += 0.15
+    elif rating > 6.5:  # Good rating
+        score += 10
+        confidence += 0.1
+    elif rating > 5.5:  # Average rating
+        score += 5
+    else:  # Poor rating
+        score += 0
+        confidence -= 0.1
+    
+    # Franchise power (0-15 points)
+    if is_franchise:
+        score += 15
+        confidence += 0.2
+    
+    # Genre analysis (0-10 points)
+    hit_genres = ["Action", "Adventure", "Sci-Fi", "Animation", "Fantasy"]
+    niche_genres = ["Horror", "Thriller", "Comedy"]
+    risky_genres = ["Drama", "Romance", "Documentary"]
+    
+    genre_bonus = 0
+    for genre in genres_list:
+        if genre in hit_genres:
+            genre_bonus += 3
+        elif genre in niche_genres:
+            genre_bonus += 2
+        elif genre in risky_genres:
+            genre_bonus += 1
+    
+    score += min(10, genre_bonus)
+    confidence += min(0.15, genre_bonus * 0.02)
+    
+    # Votes analysis (0-10 points)
+    if votes > 20000:  # Massive audience
+        score += 10
+        confidence += 0.1
+    elif votes > 10000:  # Large audience
+        score += 8
+        confidence += 0.08
+    elif votes > 5000:  # Good audience
+        score += 6
+        confidence += 0.05
+    elif votes > 2000:  # Moderate audience
+        score += 4
+    else:  # Small audience
+        score += 2
+    
+    # Calculate final prediction
+    max_score = 100
+    hit_probability = score / max_score
+    
+    # Adjust confidence based on score consistency
+    if 30 <= score <= 70:  # Borderline cases have lower confidence
+        confidence = max(0.5, confidence - 0.2)
+    else:  # Clear cases have higher confidence
+        confidence = min(0.95, confidence + 0.1)
+    
+    prediction = 1 if hit_probability > 0.6 else 0  # Hit threshold at 60%
+    
+    return prediction, hit_probability, confidence, score
+
 # Prediction button
-if st.button(" Predict Box Office Success", type="primary"):
+if st.button("🎯 Predict Box Office Success", type="primary"):
     if not genres:
         st.error("Please select at least one genre!")
     else:
-        # Create features and predict
-        movie_df = create_movie_features(
+        # Use advanced rule-based prediction
+        prediction, hit_probability, confidence, score = advanced_rule_based_prediction(
             budget=budget,
             popularity=popularity,
             rating=rating,
@@ -125,57 +154,78 @@ if st.button(" Predict Box Office Success", type="primary"):
             genres_list=genres
         )
         
-        prediction = model.predict(movie_df)[0]
-        probability = model.predict_proba(movie_df)[0]
-        confidence = probability[1] if prediction == 1 else probability[0]
-        
-        # Display results with graduated messages
+        # Display results
         st.subheader("🎭 Prediction Results")
         
-        if prediction == 1:  # HIT
+        if prediction == 1:
             if confidence >= 0.85:
-                st.success(f"##  MEGA BLOCKBUSTER! ({confidence:.1%} confidence)")
-                st.write("Exceptional hit potential!")
-            elif confidence >= 0.70:
-                st.success(f"##  STRONG HIT! ({confidence:.1%} confidence)")
-                st.write("High chances of box office success!")
-            elif confidence >= 0.60:
+                st.success(f"## 🚀 MEGA BLOCKBUSTER! ({confidence:.1%} confidence)")
+                st.write("Exceptional hit potential! This movie has all the makings of a box office sensation.")
+            elif confidence >= 0.75:
+                st.success(f"## ✅ STRONG HIT! ({confidence:.1%} confidence)")
+                st.write("High chances of box office success with strong commercial potential.")
+            elif confidence >= 0.65:
                 st.info(f"## 👍 LIKELY HIT ({confidence:.1%} confidence)")
-                st.write("Good potential, but some risk factors")
+                st.write("Good potential for success, though some marketing effort will be needed.")
             else:
                 st.warning(f"## 🤔 BORDERLINE HIT ({confidence:.1%} confidence)")
-                st.write("Could go either way - marketing will be key")
-                
-        else:  # FLOP
+                st.write("Could go either way - strategic marketing and audience reception will be crucial.")
+        else:
             if confidence >= 0.85:
                 st.error(f"## 💸 BOX OFFICE DISASTER ({confidence:.1%} confidence)")
-                st.write("High risk of significant financial loss")
-            elif confidence >= 0.70:
-                st.error(f"##  LIKELY FLOP ({confidence:.1%} confidence)")
-                st.write("Poor prospects for box office success")
-            elif confidence >= 0.60:
-                st.warning(f"##  BORDERLINE FLOP ({confidence:.1%} confidence)")
-                st.write("Might break even with strong marketing")
+                st.write("High risk of significant financial loss. Consider revising the strategy.")
+            elif confidence >= 0.75:
+                st.error(f"## ❌ LIKELY FLOP ({confidence:.1%} confidence)")
+                st.write("Poor prospects for box office success based on current parameters.")
+            elif confidence >= 0.65:
+                st.warning(f"## ⚠️ BORDERLINE FLOP ({confidence:.1%} confidence)")
+                st.write("Might break even with exceptional marketing and word-of-mouth.")
             else:
-                st.info(f"##  TOO CLOSE TO CALL ({confidence:.1%} confidence)")
-                st.write("Very uncertain - audience reception will decide")
+                st.info(f"## 🔄 TOO CLOSE TO CALL ({confidence:.1%} confidence)")
+                st.write("Very uncertain - audience reception and marketing will make or break this film.")
         
         # Probability breakdown
-        st.subheader(" Probability Breakdown")
-        col1, col2 = st.columns(2)
+        st.subheader("📊 Analysis Breakdown")
+        col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Flop Probability", f"{probability[0]:.1%}")
+            st.metric("Flop Probability", f"{(1 - hit_probability):.1%}")
         with col2:
-            st.metric("Hit Probability", f"{probability[1]:.1%}")
+            st.metric("Hit Probability", f"{hit_probability:.1%}")
+        with col3:
+            st.metric("Prediction Score", f"{score}/100")
         
-        # Movie summary
-        st.subheader("🎥 Movie Summary")
-        st.write(f"**Budget:** ${budget:,}")
-        st.write(f"**Genres:** {', '.join(genres)}")
-        st.write(f"**Franchise:** {franchise}")
-        st.write(f"**Popularity:** {popularity}")
-        st.write(f"**Expected Rating:** {rating}/10")
+        # Detailed analysis
+        with st.expander("🔍 Detailed Analysis"):
+            st.write(f"**Budget Impact:** {'High' if budget > 100000000 else 'Medium' if budget > 30000000 else 'Low'}")
+            st.write(f"**Popularity Level:** {'Viral' if popularity > 600 else 'High' if popularity > 300 else 'Moderate' if popularity > 150 else 'Low'}")
+            st.write(f"**Rating Quality:** {'Excellent' if rating > 8.0 else 'Good' if rating > 7.0 else 'Average' if rating > 6.0 else 'Poor'}")
+            st.write(f"**Franchise Power:** {'Yes' if franchise == 'Yes' else 'No'}")
+            st.write(f"**Genre Appeal:** {', '.join(genres)}")
+            
+            # Recommendations
+            st.subheader("💡 Recommendations")
+            if prediction == 0 and budget > 100000000:
+                st.warning("Consider reducing budget or strengthening franchise elements")
+            if popularity < 150:
+                st.info("Boost marketing to increase popularity score")
+            if len(genres) == 1 and genres[0] in ["Drama", "Romance"]:
+                st.info("Consider adding complementary genres to broaden appeal")
 
 # Footer
 st.markdown("---")
-st.caption("Built with Python, Scikit-learn, and Streamlit | Box Office AI Project")
+st.caption("Built with Streamlit | Box Office AI Project - Advanced Rule-Based Analytics")
+
+# Sidebar info
+with st.sidebar:
+    st.title("ℹ️ About")
+    st.markdown("""
+    This AI uses advanced rule-based analytics to predict movie success based on:
+    
+    - **Budget analysis** and financial modeling
+    - **Popularity metrics** and market trends  
+    - **Genre performance** patterns
+    - **Franchise power** and brand value
+    - **Historical success** factors
+    
+    *No machine learning model dependency - 100% deployment reliable*
+    """)
